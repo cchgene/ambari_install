@@ -1,0 +1,287 @@
+before
+安裝anaconda
+$sh Anaconda3-2018.12-Linux-x86_64.sh
+$vi /etc/profile
+底下新增
+export PATH="/root/anaconda3/bin:$PATH"
+最後檢查python version
+$python -V
+如果是3.X版就是了
+
+1.安裝Centos7(everyone)
+
+2.建立sudo使用者(everyone)
+$su root
+$visudo
+2.1尋找root ALL=(ALL) ALL並在下方新增
+user ALL=(ALL) ALL
+2.2save
+
+3.安裝jdk-8u144(everyone)
+3.1Centos7有自帶jdk1.8所以要先移除
+3.2移除自有jdk
+3.2.1查詢現有java
+$rpm -qa|grep java
+$rpm -qa|grep jdk
+3.2.2移除現有java
+$rpm -e --nodeps jdk-1.8.3XXXX(這邊就是放上面查詢出來的版本名)
+3.3安裝jdk-8u144
+3.3.1將jdk-8u144-linux-x64.tar.gz放入/tmp中
+3.3.2安裝(其實是解壓縮)
+tar -zxvf /tmp/jdk-8u144-linux-x64.tar.gz /usr/java/
+3.3.2.1若usr內沒有java請
+$mkdir -p /usr/java
+3.3.3建立軟連結
+$ln -s /usr/java/jdk1.8.0_144/ /usr/java/java
+3.3.4修改設定檔
+$vi /etc/profile
+在最下面新增
+export JAVA_HOME=/usr/java/java
+export JRE_HOME=${JAVA_HOME}/jre
+export CLASSPATH=.:${JAVA_HOME}/lib:${JRE_HOME}/lib
+export PATH=${JAVA_HOME}/bin:$PATH
+3.3.4.1save
+3.3.4.2重啟linux設定檔
+$source /etc/profile
+3.3.5檢查java版本
+$java -version
+若是java version "1.8.0_144"即完成
+
+4.關閉防火牆(everyone)
+$sudo setenforce 0
+$sudo vi /etc/selinux/config
+改內容SELINUX=disabled
+$sudo systemctl stop firewalld.service
+$sudo systemctl disable firewalld.service
+
+5.同步本機時間(everyone)(failed)=========================================
+$sudo chkconfig ntpd on
+$sudo service ntpd start
+5.1若未安裝ntpd
+5.1.1 install ntpd
+$sudo yum -y install ntp
+
+6.設定SSH登入免詢問(everyone) (這個要切換到root做)
+$sudo vi /etc/ssh/ssh_config
+改內容StrictHostKeyChecking no
+$sudo service sshd restart
+
+7.重新命名三台電腦(各別做)
+$hostname dscentos01   (其他台改成02,03)
+
+8.關閉PackageKit(failed)============================================
+centos6
+vi /etc/yum/pluginconf.d/refresh-packagekit.conf
+enabled=0
+Centos7
+systemctl disable packagekit
+
+9.驗證umask Value
+vi /etc/profile
+在檔案末行加上   umask 022
+
+10.設定主機資訊 (master做)
+$vi /etc/hosts
+檔案底下新增下列三行
+192.168.142.150 master
+192.168.142.151 slaver1
+192.168.142.152 slaver2
+
+11.產生 keygen 複製 key 到cluster各臺  (master做)
+$ssh-keygen -t rsa -f ~/.ssh/id_rsa -P ""
+$cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+$ssh-copy-id -i ~/.ssh/id_rsa.pub root@slaver1
+$ssh-copy-id -i ~/.ssh/id_rsa.pub root@slaver2
+
+12.HDP建議關閉 Transparent Huge Pages  (master做)
+$echo never > /sys/kernel/mm/transparent_hugepage/enabled
+$echo never > /sys/kernel/mm/transparent_hugepage/defrag
+
+13.cluster各機器重新開機 (everyone)
+$reboot
+
+14.建立Repo Server(master做)
+14.1掛載OS安裝資源
+14.1.1將centos7的iso檔放到/home/dscentos01/
+14.1.2
+$mkdir -p /media/CentOS
+$mount -o loop /home/dscentos01/CentOS-7-x86_64-DVD-1810.iso /media/CentOS/
+14.2安裝HTTPD服務
+14.2.1檢查HTTP是否已安裝
+$sudo systemctl list-unit-files | grep httpd
+14.2.2安裝HTTP
+$cd /media/CentOS/Packages/
+$sudo rpm -ivh apr-1.4.8-3.el7_4.1.x86_64.rpm
+$sudo rpm -ivh apr-util-1.5.2-6.el7.x86_64.rpm
+$sudo rpm -ivh apr-devel-1.4.8-3.el7_4.1.x86_64.rpm
+$sudo rpm -ivh expat-devel-2.1.0-10.el7_3.x86_64.rpm
+$sudo rpm -ivh libdb-devel-5.3.21-24.el7.x86_64.rpm
+$sudo rpm -ivh cyrus-sasl-devel-2.1.26-23.el7.x86_64.rpm
+#上面這個可能會出現相依性問題 不過經過測試略過相依性仍可啟動HTTP 就改用下面這個
+-----若上面不行則使用這個$sudo rpm -ivh cyrus-sasl-devel-2.1.26-23.el7.x86_64.rpm  --nodeps --force
+$sudo rpm -ivh openldap-devel-2.4.44-20.el7.x86_64.rpm
+$sudo rpm -ivh pkgconfig-0.27.1-4.el7.x86_64.rpm
+$sudo rpm -ivh apr-util-devel-1.5.2-6.el7.x86_64.rpm
+$sudo rpm -ivh httpd-tools-2.4.6-88.el7.centos.x86_64.rpm
+$sudo rpm -ivh mailcap-2.1.41-2.el7.noarch.rpm
+$sudo rpm -ivh httpd-2.4.6-88.el7.centos.x86_64.rpm
+14.2.3使其開機時會自動啟動
+$sudo systemctl enable httpd.service
+14.2.4啟動服務
+$sudo systemctl start httpd.service
+14.2.5確認HTTP已安裝完成
+$sudo systemctl status httpd.service
+14.3建置安裝檔儲存庫
+14.3.1CentOS作業系統
+$mkdir -p /var/www/html/CentOS
+$cp -rfv /media/CentOS/* /var/www/html/CentOS
+$chmod -R 777 /var/www/html/CentOS
+$chown -R root:root /var/www/html/CentOS
+14.3.2HDP
+$mkdir -p /var/www/html/external
+$tar -xvf HDP-2.6.5.0-centos7-rpm.tar.gz -C /var/www/html/external/
+$tar -xvf HDP-UTILS-1.1.0.22-centos7.tar.gz -C /var/www/html/external/
+$tar -xvf ambari-2.6.0.0-centos7.tar.gz -C /var/www/html/external/
+$chmod -R ugo+rX /var/www/html/external/
+$chown -R root:root /var/www/html/external/
+14.3.3檢測
+透過瀏覽器連結Repo路徑
+http://${RepoServerIP}/CentOS
+http://${RepoServerIP}/external
+若能出現檔案目錄表示建置成功
+14.4備份yum.repo
+$mkdir ~/backup_yum_repo
+$sudo mv /etc/yum.repos.d/* ~/backup_yum_repo
+14.5建立repo檔
+14.5.1 ambari.repo
+$cd /etc/yum.repos.d/
+$sudo vi ambari.repo
+[ambari-2.6.0.0]
+name=Ambari-2.6.0.0
+baseurl=http://192.168.17.140/external/ambari/centos7/2.6.0.0-267/
+gpgcheck=1
+gpgkey=http://192.168.17.140/external/ambari/centos7/2.6.0.0-267/RPM-GPG-KEY/RPM-GPG-KEY-Jenkins
+enabled=1
+14.5.2 hdp.repo
+$sudo vi hdp.repo
+[HDP-2.6.5.0]
+name=Hortonworks Data Platform Version - HDP-2.6.5.0
+baseurl=http://192.168.17.140/external/HDP/centos7/2.6.5.0-292/
+gpgcheck=1
+gpgkey=http://192.168.17.140/external/HDP/centos7/2.6.5.0-292/RPM-GPG-KEY/RPM-GPG-KEY-Jenkins
+enabled=1
+
+[HDP-UTILS-1.1.0.22]
+name=Hortonworks Data Platform Utils Version - HDP-UTILS-1.1.0.22
+baseurl=http://192.168.17.140/external/HDP-UTILS/centos7/1.1.0.22/
+gpgcheck=1
+gpgkey=http://192.168.17.140/external/HDP-UTILS/centos7/1.1.0.22/RPM-GPG-KEY/RPM-GPG-KEY-Jenkins
+enabled=1
+14.6 刷新yum.repo
+$yum clean all
+$yum makecache
+14.7將repo檔傳至其他兩台
+$cd /etc/yum.repos.d/
+$scp ambari.repo hdp.repo root@dscentos02:/etc/yum.repos.d/
+$scp ambari.repo hdp.repo root@dscentos03:/etc/yum.repos.d/
+
+15.安裝postgre(因為ambari需要)
+15.1把Centos光碟掛載進來
+$mount -o loop /home/m4/CentOS-7-x86_64-DVD-1810.iso /media/CentOS/
+15.2安裝postgre
+$cd /media/CentOS/Packages/
+$sudo rpm -ivh postgresql-libs-9.2.24-1.el7_5.x86_64.rpm
+$sudo rpm -ivh postgresql-9.2.24-1.el7_5.x86_64.rpm
+$sudo rpm -ivh postgresql-server-9.2.24-1.el7_5.x86_64.rpm
+
+16.安裝ambari
+$yum -y install ambari-server
+$ambari-server setup
+裡面要依序輸入
+n
+3
+/usr/java/java/
+y
+1
+以下都使用預設值   enter就好
+  Database admin user (postgres):
+  Database name (ambari):
+  Postgres schema (ambari):
+  Username (ambari):
+  Enter Database Password (bigdata):
+16.1調整ambari記憶體
+$vi /var/lib/ambari-server/ambari-env.sh
+找到 AMBARI_JVM_ARGS
+-Xmx4096m -XX:MaxPermSize=256m
+16.2啟動
+$ambari-server start
+在網頁輸入
+http://192.168.17.140:8080
+如果有看到ambari登入畫面就成功了
+16.3新增使用者
+hdfs
+pw:hdfs
+
+17.利用ambari install HADOOP
+17.1取名
+DDHADO
+17.2Version
+17.2.1選擇跟安裝一樣的版本
+17.2.2use local repository
+下方放入
+http://192.168.17.140/external/HDP-UTILS/centos7/1.1.0.22/
+http://192.168.17.140/external/HDP/centos7/2.6.5.0-292/
+17.3install options
+17.3.1target hosts
+放入
+dscentos04
+dscentos02
+dscentos03
+17.3.2provide your id_rsa
+複製dscentos04's id-rsa貼上至此(要包含begein and end)
+17.4confirm hosts (everyone)
+17.4.1確認每個hosts success
+若不成功
+開始檢查下列
+上面第4.5.6.7.9.10項都要檢查
+17.4.2
+$vi /etc/hosts
+看是否正確
+$vi /etc/hostname
+看是否正確
+$vi /etc/sysconfig/network
+裡面新增
+NETWORKING=yes
+HOSTNAME=這台電腦的名子
+$vi /etc/ambari-agent/conf/ambari-agent.ini
+[server]下面的hostname是否為主機(master)的名子
+17.4.3最後如果再不行出現下面錯誤
+"""WARNING 2018-07-16 00:52:18,885 NetUtil.py:124 - Server at https://ambari-hostname:8440 is not reachable, sleeping for 10 seconds..."""
+可能是因為ambari&java有衝突
+原文
+Cause: 
+This issue occurs because the Java is restricting the TLSv1 used by the Ambari Agents. By default, ambari-agent connects to TLSv1, unless specified by force_https_protocol=PROTOCOL_TLSv1_2 in ambari-agent.ini. 
+Solution: 
+To resolve this issue, add the following property in ambari-agent.ini file under [security]and restart ambari-agent: 
+force_https_protocol=PROTOCOL_TLSv1_2
+翻譯成中文就是
+$vi /etc/ambari-agent/conf/ambari-agent.ini
+在[security]下方新增
+force_https_protocol=PROTOCOL_TLSv1_2
+17.4.4重啟agent
+$ambari-agent restart
+(ps 17.4是每一台都要檢查)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
